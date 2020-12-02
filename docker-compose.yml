@@ -1,0 +1,28 @@
+version: '3.5'
+
+services:
+        database:
+                image: mysql
+                container_name: mykabum
+                ports:
+                        - "3306:3306"
+                environment:
+                        MYSQL_ROOT_PASSWORD: myKw15
+                        MUSQL_DATABASE: kabum
+                networks:
+                        - kabum-network
+
+        webserver:
+                image: nginx:alpine
+                container_name: webserver
+                volumes:
+                        - ./backend/:/usr/share/nginx/html/
+                ports:
+                        - "80:80"
+                        - "443:443"
+                networks:
+                        - kabum-network
+
+networks:
+        kabum-network:
+                driver: bridge
