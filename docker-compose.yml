@@ -13,10 +13,13 @@ services:
                         - kabum-network
 
         webserver:
-                image: nginx:alpine
+                image: nginx:kabum
                 container_name: webserver
                 volumes:
-                        - ./backend/:/usr/share/nginx/html/
+                        - ./frontend/:/usr/share/nginx/html/
+                        - ./backend/:/usr/lib/cgi-bin/sys/
+                        - ./etc/nginx:/etc/nginx
+                        - ./etc/credentials.pl:/etc/kabum/credentials.pl
                 ports:
                         - "80:80"
                         - "443:443"

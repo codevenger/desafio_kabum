@@ -1,0 +1,129 @@
+@import url(http://fonts.googleapis.com/css?family=Roboto:300,400,500,700,400italic);
+
+html, body {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  background: url(https://static.kabum.com.br/conteudo/layout/001/bg_meio.jpg) no-repeat scroll center top, url(https://static.kabum.com.br/conteudo/layout/001/bg_continuous.jpg) repeat-x left top;
+}
+
+.wrapper {
+  max-width: 300px;
+}
+
+.outer {
+  padding: 12px;
+}
+
+md-input-container {
+  margin: 8px;
+}
+
+.btn {
+  margin-top: -4px;
+  vertical-align: middle;
+}
+
+.logo {
+  margin: auto;
+  margin-bottom: 40px;
+  margin-top: -100px;
+  width: 288px;
+  height: 104px;
+  text-align: center;
+}
+
+.md-success {
+  color: white !important;
+  background-color: green !important;
+}
+
+md-toast.md-success-toast-theme .md-toast-content {
+  margin-top: 45px;
+  background-color: green;
+}
+
+md-toast.md-error-toast-theme .md-toast-content {
+  margin-top: 45px;
+  background-color: orange;
+  text-align: center;
+}
+
+md-toolbar.md-short {
+    height: 45px;
+    min-height: 45px;
+    max-height: 45px;
+}
+
+md-sidenav, md-backdrop.md-sidenav-backdrop {
+    margin-top: 45px;
+}
+
+.rotate{
+    margin-top: -2px;
+    -moz-transition: all .3s linear;
+    -webkit-transition: all .3s linear;
+    transition: all .3s linear;
+}
+
+.rotate.change{
+    -ms-transform: rotate(180deg);
+    -moz-transform: rotate(180deg);
+    -webkit-transform: rotate(180deg);
+    transform: rotate(180deg);
+    opacity: 0;
+}
+
+.nrotate{
+    margin-top: -4px;
+    position: relative;
+    left: -27px;
+    opacity: 0;
+    -moz-transition: all .3s linear;
+    -webkit-transition: all .3s linear;
+    transition: all .3s linear;
+}
+
+.nrotate.change{
+    font-size: 30px;
+    background-color: rgb(100,113,207);
+    border-radius: 50%;
+    -ms-transform: rotate(180deg);
+    -moz-transform: rotate(180deg);
+    -webkit-transform: rotate(180deg);
+    transform: rotate(180deg);
+    opacity: 1;
+}
+
+.md-accordion-toggle .fa:first-child{
+    font-size: 20px !important;
+    margin-right: 10px !important;
+}
+
+.md-accordion-button .fa{
+    font-size: 20px !important;
+    margin-right: 10px !important;
+    width: 20px;
+    text-align: center;
+}
+
+label {
+    color: rgb(225,225,225) !important;
+}
+
+md-input-container label:not(.md-container-ignore).md-required::after {
+    color: rgb(225,225,225) !important;
+}
+
+input {
+    color: rgb(225,225,225) !important;
+    font-weight: normal;
+}
+
+.md-button.md-default-theme.md-fab[disabled], .md-button.md-fab[disabled], .md-button.md-default-theme.md-raised[disabled], .md-button.md-raised[disabled] {
+    background-color: rgb(221,44,0,0.4) !important;
+}
+
+

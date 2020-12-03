@@ -1,0 +1,23 @@
+{
+  "name": "Kabum",
+  "version": "0.2",
+  "description": "Desafio técnico para o processo seletivo Kabum fullstack developer",
+  "main": "index.js",
+  "repository": "https://github.com/codevenger/kabum",
+  "author": "Luciano Giordani Bassani",
+  "license": "GPL-2.0-or-later",
+  "private": false,
+  "dependencies": {
+    "@uirouter/angularjs": "^1.0.22",
+    "angular": "^1.7.9",
+    "angular-animate": "^1.7.8",
+    "angular-aria": "^1.7.8",
+    "angular-material": "^1.2.1",
+    "angular-material-accordion": "https://github.com/codevenger/angular-material-accordion",
+    "angular-messages": "^1.7.8",
+    "angular-sanitize": "^1.7.8",
+    "font-awesome": "^4.7.0",
+    "material-design-icons": "^3.0.1"
+  },
+  "devDependencies": {}
+}
