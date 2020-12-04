@@ -12,16 +12,52 @@ if($sid eq "") {
 } elsif($sid !~ /^\d+$/) {
     error("Código de indentificação inválido");
 } else {
-    my $sth = $dbh->prepare(qq(select system.mkmenu(?) as res ));
-    $sth->execute($sid);
+    my $sth = $dbh->prepare(qq(select distinct * from menu_control where parent is null order by seq ));
+    $sth->execute();
     if($dbh->err ne "") {
         error("Falha ao gerar o menu ");
     }
-    if($sth->rows() == 0) {
+    if($sth->rows == 0) {
         deny($sid);
     } else {
-        my $row = $sth->fetchrow_hashref;
-        say_json($row->{res});
+        my $res = '[';
+        while(my $row = $sth->fetchrow_hashref) {
+            $res .= '{"id" : "'.$row->{'id'}.'", ';
+            $res .= '"descrp" : "'.$row->{'descrp'}.'", ';
+            $res .= '"goto" : "'.$row->{'goto'}.'", ';
+            $res .= '"css" : "'.$row->{'css'}.'", ';
+            $res .= '"parent" : "'.$row->{'parent'}.'" ';
+            $res .= menusub($dbh, $row->{'id'});
+            $res .= ' }, ';
+        }
+        $res =~ s/\,\s+$/]/;
+        say_json($res);
     }
 }
 
+
+
+
+sub menusub {
+    my ($dbh, $menu) = @_;
+    
+    my $sth = $dbh->prepare(qq(select * from menu_control where parent = '$menu' order by seq ));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao popular recurso requisitado: ".$dbh->errstr);
+    }
+    if($sth->rows() > 0) {
+        my $res = ', "submenu" : [';
+        while(my $row = $sth->fetchrow_hashref) {
+            $res .= '{"id" : "'.$row->{'id'}.'", ';
+            $res .= '"descrp" : "'.$row->{'descrp'}.'", ';
+            $res .= '"goto" : "'.$row->{'goto'}.'", ';
+            $res .= '"css" : "'.$row->{'css'}.'", ';
+            $res .= '"parent" : "'.$row->{'parent'}.'" ';
+            menusub($dbh, $row->{'id'});
+            $res .= ' }, ';
+        }
+        $res =~ s/\,\s+$/]/;
+        return $res;
+    }
+}

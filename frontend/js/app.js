@@ -41,7 +41,7 @@ app.controller("signinCtrl", function($sce, $scope, $state, $http, $config, $mdT
                 if(response.data) {
                     response = response.data;
                 }
-                var decoded = response.message;
+                var decoded = angular.element('<textarea />').html(response.message).text();
                 $mdToast.show(
                     $mdToast.simple()
                     .position('top right')

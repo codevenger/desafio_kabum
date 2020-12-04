@@ -11,6 +11,10 @@ Proceda com os seguintes comandos:
     $ docker exec -ti webserver service fcgiwrap start
     $ docker exec -ti webserver chmod a+rwx /var/run/fcgiwrap.socket
 
+Sugestão para criação do banco de dados:
+
+    $ mysql -h 172.19.0.1 -u kabum -pn030N603y5qLf4497 kabum < database.sql
+
     
     
 Acesse com seu navegador web o endereço [http://localhost/](http://localhost)

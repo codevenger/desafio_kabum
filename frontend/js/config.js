@@ -2,7 +2,7 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
 
     $mdThemingProvider.theme('default')
         .primaryPalette('orange')
-        .accentPalette('grey');;
+        .accentPalette('grey');
 
     $urlRouterProvider.otherwise('/signin');
     

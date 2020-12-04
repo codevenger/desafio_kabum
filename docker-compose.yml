@@ -2,13 +2,17 @@ version: '3.5'
 
 services:
         database:
-                image: mysql
+                image: mysql/mysql-server:5.7
                 container_name: mykabum
                 ports:
                         - "3306:3306"
+                expose:
+                        - "3306"
                 environment:
                         MYSQL_ROOT_PASSWORD: myKw15
-                        MUSQL_DATABASE: kabum
+                        MYSQL_DATABASE: kabum
+                        MYSQL_USER: kabum
+                        MYSQL_PASSWORD: n030N603y5qLf4497
                 networks:
                         - kabum-network
 

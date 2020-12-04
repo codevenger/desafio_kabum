@@ -85,7 +85,7 @@ if($this =~ /signin$/) {
 } elsif($sid eq "" || $ip eq "") {
     deny($sid);
 } else {
-    $sth = $dbh->prepare(qq(select * from system.users_signin where sid = ? and now() < ("end" + interval '$timeout seconds') ));
+    $sth = $dbh->prepare(qq(select * from users_signin where sid = ? and now() < (`end` + interval $timeout second) ));
     $sth->execute($sid);
     if($dbh->err ne "") {
         error("Falha em localizar o sid no log do Login!");
@@ -94,13 +94,13 @@ if($this =~ /signin$/) {
         $row = $sth->fetchrow_hashref;
         $user{code} = $row->{'user'};
         $user{entity} = $row->{'entity'};
-        $rv = $dbh->do(qq(update system.users_signin set "end" = now() where sid = '$sid' and ip = '$ip'));
+        $rv = $dbh->do(qq(update users_signin set `end` = now() where sid = '$sid' and ip = '$ip'));
         if($dbh->err ne "") {
             error("Falha em atualizar o sid no log do Login");
         }
         
         # gera variaveis de ambiente do usuario
-        $sth = $dbh->prepare(qq(select users.*, users.id as id, users.name as name from system.users users where users.id = '$user{code}'));
+        $sth = $dbh->prepare(qq(select users.*, users.id as id, users.name as name from users where users.id = '$user{code}'));
         $sth->execute();
         if($dbh->err ne "") { 
             error("Não foi possível acessar os dados do usuário");
@@ -145,19 +145,14 @@ return true;
 
 
 sub connect {
-	require "/etc/kabum/credentials.pl";
-	return false;
-    $dbh = DBI->connect("DBI:mysql:dbname=$db;host=$server;port=$port",$user,$pass) || die "Erro na conexão!!! $!\n\n";
+    require "/etc/kabum/credentials.pl";
+    $dbh = DBI->connect("DBI:mysql:database=$db;host=$server;port=$port", $user, $pass) || die "Erro na conexão!!!\n\n";
     
     # desabilita Autocommit
     $dbh->{AutoCommit} = 0;
 
     # força UTF-8 nos resultados das consultas
     $dbh->{pg_enable_utf8} = 1;
-    $dbh->do("SET client_encoding TO 'UTF8';");
-    
-    # seta tratamento de datas para portugues
-    $dbh->do("SET lc_time = 'pt_BR.UTF8';");
 }
 
 sub get {

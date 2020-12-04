@@ -57,20 +57,60 @@ if($sid ne "" && $sid !~ /^\d+$/) {
     error("Você precisa informar uma senha");
 } else {
     $dbh->begin_work;
-    $sth=$dbh->prepare(qq(select system.signin(?, ?, ?, ?) as res));
-    $sth->execute(($ip, $sid, $username, $password));
+    $sth=$dbh->prepare(qq(select id AS code, JSON_OBJECT('id', id, 'username', username, 'name', name, 'email', email) AS user from users where username = ? and password = password(?) ));
+    $sth->execute(($username, $password));
     if($dbh->err ne "") {
         error("Falha ao conferir o usuário e senha: ".$dbh->errstr);
     }
-    $row = $sth->fetchrow_hashref;
-    if($row->{res} !~ /['|"]status['|"]\s?[=|:]+\s?200/i) {
-        $sth=$dbh->prepare(qq(select system.signin(?, ?, ?, ?) as res));
-        $sth->execute(($ip, $sid, $username, $password));
-        $row = $sth->fetchrow_hashref;
-    }
+    $rv =  $sth->rows;
     
-    $dbh->commit;
-    &say_json($row->{res});
+    if($rv == 0) {
+        $dbh->rollback;
+        deny();
+    } elsif($rv == 1) {
+        $row = $sth->fetchrow_hashref;
+        
+        if($sid =~ /^\d+$/) {
+            $sth2 = $dbh->prepare(qq(select * from users_signin where user=? and sid=? and ip=? order by end desc));
+            $sth2->execute(($row->{'code'}, $sid, $ip));
+            if($dbh->err ne "") {
+                error("Falha em localizar o sid no log do Login!");
+            }
+            if($sth2->rows > 0) {
+                $row2 = $sth2->fetchrow_hashref;
+                $sid = $row2->{'sid'};
+                $user{entity} = $row->{'entity'};
+
+                $rv = $dbh->do(qq(update users_signin set `end` = now(), `req` = 'Relogou no sistema' where sid = '$sid' and ip = '$ip'));
+                if($dbh->err ne "") {
+                    error("Falha atualizar sid no log!");
+                }
+            } else {
+                $sid = "";
+            }
+        }
+
+        # Gera um sID novo
+        if($sid eq "") {
+            $sid = time;
+            $sid .= int(rand 99999)+1;
+        }
+
+        # Efetua log do login
+        $rv = $dbh->do(qq(insert into users_signin (user, start, end, ip, sid, req) values ('$row->{code}', now() , now(), '$ip', '$sid', 'Logou no sistema')));
+        if($dbh->err ne "") {
+             error("Falha ao criar o log no Login!");
+        }
+
+        $dbh->commit;
+        say_json('{"status": 200, "message": "Credencial aceita", "sid": "'.$sid.'", "user": '.$row->{user}.'}');
+    } elsif($rv > 1) {
+        $dbh->rollback();
+        error("Lista de usuários inconsistente");
+    } else {
+        $dbh->rollback();
+        error("Falha ao consultar lista de usuários");
+    }
 }
 
 

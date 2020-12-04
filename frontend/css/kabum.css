@@ -5,7 +5,7 @@ html, body {
   height: 100%;
 }
 
-body {
+.bgblue {
   background: url(https://static.kabum.com.br/conteudo/layout/001/bg_meio.jpg) no-repeat scroll center top, url(https://static.kabum.com.br/conteudo/layout/001/bg_continuous.jpg) repeat-x left top;
 }
 
@@ -88,7 +88,7 @@ md-sidenav, md-backdrop.md-sidenav-backdrop {
 
 .nrotate.change{
     font-size: 30px;
-    background-color: rgb(100,113,207);
+    background-color: rgb(244, 177, 132);
     border-radius: 50%;
     -ms-transform: rotate(180deg);
     -moz-transform: rotate(180deg);
