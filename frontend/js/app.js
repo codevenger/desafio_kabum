@@ -90,7 +90,7 @@ app.controller("homeCtrl", function($scope, $state){
 app.controller("defaultCtrl", function($sce, $scope, $state, $api, $mdToast, $mdDialog){
     this.columns = $state.current.render.columns;
     this.data = $state.current.render.data;
-    var resource = $state.current.render.resource;
+    var resource = 'sys/'+$state.current.render.resource;
     $scope.val = {};
     $scope.selectedIndex = 0;
     $scope.editId = -1;

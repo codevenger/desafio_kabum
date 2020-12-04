@@ -108,25 +108,22 @@ if($this =~ /signin$/) {
             $row = $sth->fetchrow_hashref;
             $user{username} = $row->{'username'};
             $user{name} = $row->{'name'};
+            $user{code} = $row->{'id'};
         }
         
-        if($user{entity} =~ /^\d+$/) {
-            $sth = $dbh->prepare(qq(select e.*, g.id as group_id, g.descrp as group_name from system.users_groups d join entities e on d.entity = e.id join system.groups g on d.group = g.id where d.user = ? and e.disabled is null order by e.dt_ins limit 1));
+        if($user{code} =~ /^\d+$/) {
+            $sth = $dbh->prepare(qq(select g.id as group_id, g.descrp as group_name from users_groups d join groups g on d.group = g.id where d.user = ? order by d.dt_ins limit 1));
             $sth->execute($user{code});
             if($dbh->err ne "") {
-                error("Falha em localizar a organização a qual o usuário pertence!");
+                error("Falha em localizar o grupo do usuário!");
             }
             if($sth->rows() > 0) {
                 $row = $sth->fetchrow_hashref;
-                $user{entity} = $row->{'id'};
                 $user{group} = $row->{'group_id'};
-                $entity{id} = $row->{'id'};
-                $entity{name} = $row->{'name'};
-                $entity{alias} = $row->{'alias'};
                 $group{id} = $row->{'group_id'};
                 $group{name} = $row->{'group_name'};
             } else {            
-                error("Não foi encontrada nenhuma organização para o usuário!");
+                error("Não foi encontrada nenhum grupo para o usuário!");
             }
         }
       
@@ -247,11 +244,7 @@ sub deny {
 }
 
 sub chktbl {
-    my ($tab) = @_;
-    my $schema = 'public';
-    if($tab eq 'users' || $tab eq 'groups' || $tab eq 'users_groups' || $tab eq 'menu_groups'|| $tab eq 'menu_control' || $tab eq 'languages') {
-        $schema = 'system';
-    }
+    my $schema = 'kabum';
     
     my $sth = $dbh->prepare(qq(select * from information_schema.tables where table_schema = ? and table_name = ?));
     $sth->execute($schema, $tab);
@@ -260,24 +253,17 @@ sub chktbl {
     }
 
     if($sth->rows() == 0) {
-        $sth = $dbh->prepare(qq(select * from pg_class where relkind = 'm' and oid::regclass::text = ?));
-        $sth->execute($tab);
-        if($dbh->err ne "") {
-            error("Falha em localizar a recurso requisitado");
-        }    
-        if($sth->rows() == 0) {
-            error("Recurso $tab não encontrado");
-        }
+        error("Recurso $tab não encontrado");
     }
 
     if($user{group} eq '') {
         error("Falha em identificar o grupo do usuário");
     } else {
         # Verifica se tem direito de acesso
-        $sth = $dbh->prepare(qq(select * from system.groups_tables where "group" = '$user{group}' and "table" = ? and level > 0));
+        $sth = $dbh->prepare(qq(select * from groups_tables where "group" = '$user{group}' and "table" = ? and level > 0));
         $sth->execute($tab);
         if($dbh->err ne "") {
-            error("Falha em verificar os direitos de acesso ao recurso requisitado ".$dbh->errstr);
+            error("Falha em verificar os direitos de acesso ao recurso requisitado ");
         }
         if($sth->rows() == 0) {
             if($user{group} ne '1') {
@@ -290,9 +276,7 @@ sub chktbl {
     
     
 sub getfk {
-    my ($tab) = @_;
-    
-    my $sth = $dbh->prepare(qq(select tc.constraint_name, tc.table_name, tc.constraint_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name WHERE constraint_type = 'FOREIGN KEY' AND tc.table_name = ?));
+    my $sth = $dbh->prepare(qq(SELECT TABLE_NAME, COLUMN_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_NAME AS foreign_table_name, REFERENCED_COLUMN_NAME AS foreign_column_name FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA = 'kabum' AND REFERENCED_TABLE_NAME = ?));
     $sth->execute($tab);
     if($dbh->err ne "") {
         error("Falha ao encontrar as chaves estrangeiras ao popular recurso requisitado");
@@ -311,7 +295,6 @@ sub getfk {
 
 
 sub getpk {
-    my ($tab) = @_;
     my $p = '';
     
     if($tab eq 'users' || $tab eq 'groups' || $tab eq 'users_groups' || $tab eq 'menu_groups' || $tab eq 'languages') {

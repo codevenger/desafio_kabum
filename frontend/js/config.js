@@ -82,12 +82,6 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
                         required: "false"
                     },
                     {
-                        title: "Ícone App",
-                        field: "icon",
-                        width: 100,
-                        required: "false"
-                    },
-                    {
                         title: "Pai",
                         field: "parent",
                         width: 100,
@@ -128,42 +122,6 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
             }
         })
  
-        .state('entities', {
-            parent: main,
-            url: '/entities',
-            templateUrl: 'default/default.component.html',
-            controller: 'defaultCtrl',
-            controllerAs: 'tctrl',
-            render: {
-                name: 'Empresas',
-                resource: 'entities',
-                columns: [
-                    {
-                        title: "Código",
-                        field: "id",
-                        width: 20
-                    },
-                    {
-                        title: "Nome",
-                        field: "name"
-                    }               
-                ],
-                data: [
-                    {
-                        title: "Razão Social",
-                        field: "name",
-                        width: 100,
-                        required: "true"
-                    },
-                    {
-                        title: "Nome Fantasia",
-                        field: "alias",
-                        width: 100
-                    }
-                ]
-            }
-        })
-        
         .state('users', {
             parent: main,
             url: '/users',
@@ -187,11 +145,6 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
                     {
                         title: "Nome",
                         field: "name"
-                    },
-                    {
-                        title: "Idioma",
-                        field: "language",
-                        width: 20
                     }
                 ],
                 data: [
@@ -212,12 +165,6 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
                         field: "email",
                         width: 70,
                         required: "true"
-                    },
-                    {
-                        title: "Idioma",
-                        field: "language",
-                        width: 25,
-                        required: "false"
                     }
                 ]
             }

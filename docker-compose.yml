@@ -3,7 +3,7 @@ version: '3.5'
 services:
         database:
                 image: mysql/mysql-server:5.7
-                container_name: mykabum
+                container_name: database
                 ports:
                         - "3306:3306"
                 expose:

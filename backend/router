@@ -1,0 +1,1130 @@
+#!/usr/bin/perl
+
+require "./inc/common.pl";
+
+
+# Testa se requisição é válida
+if($ENV{'REQUEST_METHOD'} eq "DELETE") {
+    if($tab !~ /^[a-zA-Z0-9\_\-\/]+$/) {
+        error('Caracteres inválidos no nome do recurso');
+    }
+} else {
+    if($tab !~ /^[a-zA-Z0-9\_\-]+$/) {
+        error('Caracteres inválidos no nome do recurso');
+    }
+}
+
+
+my $log = $user{name}.' (código '.$user{code}.')';
+if($ENV{'REQUEST_METHOD'} eq "GET") {
+    $log .= ' consultou ';
+    &select;
+} elsif($ENV{'REQUEST_METHOD'} eq "POST") {
+    $log .= ' inseriu ';
+    $dbh->begin_work;
+    &insert;
+} elsif($ENV{'REQUEST_METHOD'} eq "PUT") {
+    $log .= ' alterou ';
+    $dbh->begin_work;
+    &update;
+} elsif($ENV{'REQUEST_METHOD'} eq "DELETE") {
+    $log .= ' excluiu ';
+    $dbh->begin_work;
+    &delete;
+} else {
+    if($ENV{'REQUEST_METHOD'} ne "") {
+        error("Requisição do tipo ".$ENV{'REQUEST_METHOD'}." não foi implementada");
+    } else {
+        error("Impossível determinar tipo de requisição");
+    }
+}
+    
+
+
+
+
+
+
+sub getfk {
+    my ($tab) = @_;
+    if($tab eq 'fullcalendar') {
+        $tab = 'calendar';
+    }
+        
+    my $sth = $dbh->prepare(qq(select tc.constraint_name, tc.table_name, tc.constraint_name, kcu.column_name, ccu.table_name AS foreign_table_name, ccu.column_name AS foreign_column_name FROM information_schema.table_constraints AS tc JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name WHERE constraint_type = 'FOREIGN KEY' AND tc.table_name = ?));
+    $sth->execute($tab);
+    if($dbh->err ne "") {
+        error("Falha ao encontrar as chaves estrangeiras ao popular recurso requisitado");
+    }
+    if($sth->rows() > 0) {
+        while(my $row = $sth->fetchrow_hashref) {
+            $fk{$row->{'table_name'}}{$row->{'column_name'}}{'tab'} = $row->{'foreign_table_name'};
+            $fk{$row->{'table_name'}}{$row->{'column_name'}}{'col'} = $row->{'foreign_column_name'};
+            if(! $fk{$row->{'foreign_table_name'}}) {
+                &getfk($row->{'foreign_table_name'});
+            }
+        }
+    }
+    return 1;
+}
+
+
+sub getpk {
+    my ($tab) = @_;
+    if($tab eq 'fullcalendar') {
+        $tab = 'calendar';
+    } elsif($tab eq "list_projects") {
+        $tab = 'projects';
+    }    
+    my $p = '';    
+    
+    # Lista a chave primária da tabela
+    $sth = $dbh->prepare(qq(select a.attname, format_type(a.atttypid, a.atttypmod) as data_type from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = '$tab'::regclass and i.indisprimary));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao encontrar a chave primária do recurso requisitado");
+    }
+    if($sth->rows() > 0) {
+        while($row = $sth->fetchrow_hashref) {
+            $p .= $tab.'.'.$row->{'attname'}.', ';
+        }
+    }
+    $p =~ s/, $//;
+    return $p;
+}
+
+
+sub gerasql {
+    my ($tab, %qsql) = @_;
+    my $sql;
+    my $sql2 = '';
+    my $sql3 = '';
+    $sql = '(select ';
+    my $rtab;
+    if($tab eq 'fullcalendar') {
+        $rtab = 'calendar';
+    } elsif($tab eq 'dti_legacy') {
+        $rtab = 'dti_legacy_list';
+    } else {
+        $rtab = $tab;
+    }
+    
+    my $tcols = '';
+    if($cols ne '') {
+        $tcols = 'and (column_name = '.$cols;
+        $tcols =~ s/,/ or column_name = /g;
+        $tcols =~ s/"/'/g;
+        $tcols .= ")";
+    }    
+    
+    my $sth = $dbh->prepare(qq(select column_name, data_type from information_schema.columns t where table_schema = 'kabum' and table_name = '$rtab' $tcols order by ordinal_position));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao popular colunas do recurso requisitado");
+    }
+    if($sth->rows() == 0) {
+        error("Não existem colunas disponíveis");
+    } else {
+        while(my $row = $sth->fetchrow_hashref) {
+            if($row->{column_name} eq 'owner' && $user{group} > 2) {
+                $sql .= 'json_agg(distinct users.*)::jsonb as owner, ';
+                $sql2 .= ' join users on owner = users.id ';
+                if($qsql{$rtab} ne '') {
+                    $qsql{$rtab} .= ' and '.$rtab.'.owner='.$user{code};
+                } else {
+                    $qsql{$rtab} = ' where '.$rtab.'.owner='.$user{code};
+                }
+            } elsif($fk{$rtab}{$row->{column_name}}{'tab'}) {
+                $sql .= 'json_agg(distinct '.$fk{$rtab}{$row->{column_name}}{'tab'}.'.*)::jsonb as '.$row->{column_name}.', ';
+                if($qsql{$fk{$rtab}{$row->{column_name}}{'tab'}} ne "") {
+                        $sql2 .= ' join ';
+                } else {
+                        $sql2 .= ' left join ';
+                }
+                $sql2 .= &gerasql($fk{$rtab}{$row->{column_name}}{'tab'}, %qsql);
+                $sql2 .= ' on '.$rtab.'.'.$row->{column_name}.' = '.$fk{$rtab}{$row->{column_name}}{'tab'}.'.'.$fk{$rtab}{$row->{column_name}}{'col'};
+                $sql3 .= &getpk($rtab).', ';
+            } elsif($row->{column_name} ne 'body' && $row->{column_name} ne 'password') {
+                $sql .= $rtab.'.'.$row->{column_name}.', ';
+            }
+        }
+        
+        if($tab eq 'entities') {
+            if($0 =~ /sysdone/) {
+                $sql .= '(select value from entities_contacts where entities_contacts.entity = entities.id and entities_contacts.type=3 order by entities_contacts.id limit 1) as email, (select value from entities_contacts where entities_contacts.entity = entities.id and entities_contacts.type=1 order by entities_contacts.id limit 1) as phone, ';
+            
+                $sql .= 'json_agg(distinct entities_docs.*)::jsonb as entity_doc, ';
+                $sql2 .= ' left join '.&gerasql('entities_docs', %qsql).' on entities_docs.entity = entities.id ';
+                $sql3 .= &getpk('entities_docs').', ';
+           
+                $sql .= 'json_agg(distinct address.*)::jsonb as address, ';
+                $sql2 .= ' left join '.&gerasql('address', %qsql).' on address.entity = entities.id ';
+                $sql3 .= &getpk('address').', ';                
+            } else {
+                $sql .= 'json_agg(distinct entities_docs.*)::jsonb as entity_doc, coalesce(billing_open.qtd, 0) as billing_open, coalesce(billing_open.discard, 0) as billing_discard, ';
+                $sql2 .= ' left join '.&gerasql('entities_docs', %qsql).' on entities_docs.entity = entities.id left join billing_open on billing_open.entity = entities.id ';
+                $sql3 .= &getpk('entities_docs').', billing_open.qtd, billing_open.discard, ';
+                
+                #$fk{'entities_contacts'}{'type'}{'tab'} = 'contacts_type';
+                #$fk{'entities_contacts'}{'type'}{'col'} = 'id';
+            
+                #$sql .= 'json_agg(distinct entities_contacts.*) as entity_contact, ';
+                #$sql2 .= ' left join '.&gerasql('entities_contacts', %qsql).' on entities_contacts.entity = entities.id ';
+                #$sql3 .= 'entities_contacts.entity, ';        
+            
+                $sql .= 'json_agg(distinct address.*)::jsonb as address, ';
+                $sql2 .= ' left join '.&gerasql('address', %qsql).' on address.entity = entities.id ';
+                $sql3 .= &getpk('address').', ';
+            }
+        } elsif($tab eq 'users') {
+            #$fk{'users'}{'entity'}{'tab'} = 'entities_users';
+            #$fk{'users'}{'entity'}{'col'} = 'id';
+            #$fk{'users'}{'group'}{'tab'} = 'groups';
+            #$fk{'users'}{'group'}{'col'} = 'id';
+            $sql .= 'json_agg(distinct entities.*)::jsonb as entity, json_agg(distinct groups.*)::jsonb as group, ';
+            $sql2 .= ' left join entities_users on entities_users.user = users.id join entities on entities_users.entity = entities.id left join groups on entities_users.group = groups.id ';
+            $sql3 .= ' users.id, ';
+        } elsif($tab eq 'entities_peoples') {
+            $sql .= '(select value from entities_peoples_contacts where entities_peoples_contacts.people = entities_peoples.id and entities_peoples_contacts.type=3 order by entities_peoples_contacts.id limit 1) as email, (select value from entities_peoples_contacts where entities_peoples_contacts.people = entities_peoples.id and entities_peoples_contacts.type=1 order by entities_peoples_contacts.id limit 1) as phone, (select value from entities_peoples_contacts where entities_peoples_contacts.people = entities_peoples.id and entities_peoples_contacts.type=4 order by entities_peoples_contacts.id limit 1) as skype, ';     
+        } elsif($tab eq 'dti_groups_entities' && $qsql{$rtab} =~ /id/) {  
+            $sql .= 'json_agg(distinct dti_groups_itens.*)::jsonb as itens, ';
+            $sql2 .= ' left join dti_groups_itens on dti_groups_entities.id = dti_groups_itens.group_entity ';
+            $sql3 .= 'dti_groups_entities.id, ';
+        } elsif($tab eq 'fullcalendar') {
+            $fk{'users'}{'language'}{'tab'} = 'languages';
+            $fk{'users'}{'language'}{'col'} = 'id';   
+            $sql .= 'json_agg(distinct users.*)::jsonb as users, ';
+            $sql2 .= ' left join calendar_users on calendar_users.calendar = calendar.id left join '.&gerasql('users', %qsql).' on calendar_users.user = users.id ';
+            $sql3 .= 'calendar_users.calendar, ';
+        } elsif($tab eq 'projects' && $0 =~ /draco/) {
+            #$fk{'projects'}{'worker'}{'tab'} = 'projects_works';
+            #$fk{'projects'}{'worker'}{'col'} = 'id';
+            $sql .= 'json_agg(distinct users.*)::jsonb as worker, ';
+            $sql2 .= ' left join projects_workers on projects.id = projects_workers.project left join '.&gerasql('users', %qsql).' on projects_workers.user = users.id ';            
+        } elsif($tab eq 'timesheet') {
+            $sql .= 'timesheet_values_hour.hour_value::numeric, ';
+            $sql2 .= ' join timesheet_values_hour on timesheet.id = timesheet_values_hour.id ';
+            $sql3 .= 'timesheet.id, timesheet_values_hour.hour_value, ';
+        } elsif($tab eq 'billing') {
+            $sql .= 'billing_summary.billing_value::numeric, billing_summary.billing_count, billing_summary.billing_totaltime, ';
+            $sql2 .= ' join billing_summary on billing.id = billing_summary.billing_id ';
+            $sql3 .= ' billing_summary.billing_value,  billing_summary.billing_count, billing_summary.billing_totaltime, ';            
+        }
+        
+        $sql =~ s/, $//;
+        $sql .= ' from '.$rtab;
+        $sql .= $sql2;
+        if($qsql{$rtab} ne "") {
+           if($qsql{$rtab} =~ /'\d\d[\/\-]\d\d[\/\-]\d\d\d\d'$/) {
+                $qsql{$rtab} =~ s/([a-z_\.]+)=/date("$1")=/;
+                $qsql{$rtab} =~ s/\./"."/;
+                $qsql{$rtab} =~ s/""/"/gm;
+            }
+            $sql .= $qsql{$rtab};
+        }
+        if($sql3 ne '') {
+            $sql3 =~ s/, $//;
+            $sql .= ' group by '.$sql3;
+        }
+        if($ord ne "") {
+            $sql .= ' order by '.$ord;
+        }
+        $sql .= ') '.$tab;
+        return $sql;
+    }
+}
+
+
+sub select {
+
+    &chktbl;
+
+    # Lista as chaves estrangeiras da tabela
+    &getfk($tab);
+
+    # Retorna conteúdo da tabela
+    (my $sql) = ($req =~ /^\/?$tab\/?\?(.*)$/);
+    my %qsql;
+    if($sql ne "") {
+        # Condição where
+        $sql = uri_unescape($sql);
+        $sql = decode_entities($sql);
+        
+        # Pega colunas
+        ($cols) = ($sql =~ /col[s|umn]*=([a-zA-Z0-9\-\_\,\.]+)/);
+        if($cols ne "") {
+            $cols =~ s/\,/", "/g;
+            $cols =~ s/\./"."/g;
+            $cols =~ s/\,\s+"$//;
+            $cols = '"'.$cols.'" ';
+        }
+        # Remove colunas
+        $sql =~ s/columns=[a-zA-Z0-9\-\_\,\.]+//i;
+        $sql =~ s/column=[a-zA-Z0-9\-\_\,\.]+//i;
+        $sql =~ s/cols=[a-zA-Z0-9\-\_\,\.]+//i;
+        $sql =~ s/col=[a-zA-Z0-9\-\_\,\.]+//i;
+        
+        # Pega order
+        ($ord) = ($sql =~ /order=([a-zA-Z0-9\-\_\,\.]+)/);
+        if($ord ne "") {
+            $ord =~ s/\,/", "/g;
+            $ord =~ s/\./"."/g;
+            $ord =~ s/\,\s+"$//;
+            $ord = '"'.$ord.'" ';
+        }
+        # Remove order
+        $sql =~ s/order=[a-zA-Z0-9\-\_\,\.]+//i;
+        
+        # Remove sID
+        $sql =~ s/sid=[a-zA-Z0-9\-\_\.]+//i;
+
+        if($sql ne "") {
+            $sql =~ s/<>/!=/gm;
+            $sql =~ s/=/='/g;
+            $sql =~ s/>=/>='/g;
+            $sql =~ s/<=/<='/g;                
+            $sql =~ s/>/>='/g;
+            $sql =~ s/</<='/g;
+            
+            $sql =~ s/\&+$//;
+            $sql =~ s/\|+$//;
+            
+            $sql =~ s/^\&+//;
+            $sql =~ s/^\|+//;
+            
+            $sql =~ s/\&/'&#/g;
+            $sql =~ s/\|/'|#/g;
+            $sql .= "'";
+            
+            my @all = split('#', $sql);
+            for(my $f; $f < scalar(@all); $f++) {
+                if($all[$f] !~ /'\d+'/) {
+                    if($all[$f] =~ /[À-Ùá-ú]/) {
+                        $all[$f] =~ s/='/<=>'/;
+                    } elsif($all[$f] =~ /\%/) {
+                        $all[$f] =~ s/=/ ilike /;
+                    }
+                    $all[$f] =~ s/\+/ /g;
+                }
+                if($all[$f] ne "" && $all[$f] !~ /^sid=/) {
+                    if($all[$f] =~ /"?[a-zA-Z0-9\-\_\/]+"?\."?[a-zA-Z0-9\-\_\/]+"?/) {
+                        ($qtab) = ($all[$f] =~ /"?([a-zA-Z0-9\-\_\/]+)"?\..*/) ;
+                    } elsif($tab eq "fullcalendar") {
+                        $qtab = 'calendar';
+                        $all[$f] = $qtab.'.'.$all[$f];
+                    } else {
+                        $qtab = $tab;
+                        $all[$f] = $tab.'.'.$all[$f];
+                    }
+                    $all[$f] =~ s/\&/ and /g;
+                    $all[$f] =~ s/\|/ or /g;
+                    $all[$f] =~ s/!='null'/ is not null/g;
+                    $all[$f] =~ s/='null'/ is null/g;
+                    $qsql{$qtab} .= $all[$f];
+                    
+                }
+            }
+
+            foreach $qkey (keys %qsql) {
+                $qsql{$qkey} =~ s/or\s+$//;
+                $qsql{$qkey} =~ s/and\s+$//;
+                $qsql{$qkey} =~ s/'' $/' /;
+                if($qsql{$qkey} ne "") {
+                    $qsql{$qkey} = " where ".$qsql{$qkey};
+                }
+            }
+        }
+    }
+
+    if($req =~ /^\/?$tab\/csv/i) {
+        $dbh->do(qq(copy (select * from $tab $sql) to STDOUT delimiter ',' CSV HEADER; ));
+        if($dbh->err ne "") {
+            error("Falha ao popular recurso requisitado: ".$dbh->errstr);
+        }
+        my @data;
+        my $x=0;
+        1 while $dbh->pg_getcopydata(\$data[$x++]) >= 0;
+        
+        if($x == 0) {
+            say("Não existem registros disponíveis");
+        } else {
+            say_csv(join("\n ", @data));
+        }            
+    } else {
+        if($cols ne "") {
+            $qcols =~ s/"[a-zA-Z0-9\-\_]+"\."[a-zA-Z0-9\-\_]+"[,]?//g;
+            $qcols =~ s/\,\s+$//;
+        }
+        
+        my $jsql;
+        $jsql = 'select row_to_json('.$tab.') as res from ';
+        $jsql .= &gerasql($tab, %qsql);
+        if($tab eq 'entities') {
+            $jsql .= ' where entities.id > 1 ';
+        }
+
+        $jsql =~ s/<='(\d+[\-\.\/]\d+[\-\.\/]\d+)'/<='$1 23:59:59'/gm;
+        $sth = $dbh->prepare($jsql);
+        $sth->execute();
+        if($dbh->err ne "") {
+            error("Falha ao popular o recurso requisitado: ".$dbh->errstr);
+        }
+        if($sth->rows() == 0) {
+            say("Não existem registros disponíveis");
+        } else {
+            my $res = "[";
+            while($row = $sth->fetchrow_arrayref) {
+                $res .= @$row[0].", ";
+            }
+            $res =~ s/\,\s+$/]/;
+            #$res =~ s/\[//gm;
+            #$res =~ s/\]//gm;
+            #$res = '['.$res.']';
+            if($sql eq "") {
+                $log .= ' a listagem da tabela ';
+            } else {
+                $log .= ' um registro da tabela ';
+            }
+            #say_log($log.$tab);
+            $res =~ s/["](\d\d)[:](\d\d)[:](\d\d)["]/"$1:$2"/gm;
+            say_json($res);
+        }
+    }
+}
+
+
+sub insert {
+
+    if($tab eq 'fullcalendar') {
+        $tab = 'calendar_controls';
+    } elsif($tab eq "list_projects") {
+        $tab = 'projects';
+    }
+
+    &chktbl;
+
+    my $p = "";
+    my $r = "";
+    my @k = ();
+    my @v = ();
+    my @w = ();
+    my $i = 0;
+    my $g = 0;
+    
+    # Lista a chave primária da tabela
+    $sth = $dbh->prepare(qq(select a.attname, format_type(a.atttypid, a.atttypmod) as data_type from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = '$tab'::regclass and i.indisprimary));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao encontrar a chave primária do recurso requisitado");
+    }
+    if($sth->rows() > 0) {
+        while($row = $sth->fetchrow_hashref) {
+            $p .= $row->{'attname'}.', ';
+            $r .= $row->{'attname'}.', ';
+        }
+    }
+        
+    my $owner = $user{'code'};
+    if($tab eq 'timesheet') {
+        my $worked = &get('worked');
+        my $day_start = &get('dt_start');
+        my $entity = &get('entity');
+        $day_start =~ s/\s[\d\:]*$//;
+        
+        if($user{group} < 3) {
+            $owner = &get('responsable');
+            if($owner eq "") {
+                $owner = $user{'code'};
+            }
+        }
+
+        $sth = $dbh->prepare(qq(select * from (select to_char(dt_start, 'DD/MM/YYYY') as day_start, sum(worked::interval) as total from timesheet where owner = '$owner' and entity = '$entity' group by day_start) as sheet where sheet.day_start = '$day_start' and (sheet.total + interval '$worked') > interval '24 hours'));
+        $sth->execute();
+        
+        if($dbh->err ne "") {
+            error($dbh->errstr);
+        }
+        
+        if($sth->rows() > 0) {
+            error("Não é permitido lançar mais de 24h em um mesmo dia para o mesmo cliente!");
+        }
+      
+    }
+    
+    # Lista as colunas da tabela
+    $sth = $dbh->prepare(qq(select column_name, data_type, coalesce(character_maximum_length, numeric_precision) as maximum_length, is_nullable from information_schema.columns t where table_schema = 'kabum' and table_name = ?));
+    $sth->execute($tab);
+
+    if($dbh->err ne "") {
+        error("Falha ao popular recurso requisitado");
+    }
+    if($sth->rows() == 0) {
+        error("Não existem colunas disponíveis");
+    } else {
+        while($row = $sth->fetchrow_hashref) {
+            if($row->{'column_name'} eq "descrp" || $row->{'column_name'} eq "name") {
+                $r .= $row->{'column_name'}.', ';
+            }
+            if($row->{'column_name'} eq 'owner') {
+                $k[$i] = 'owner';
+                $v[$i] = $owner;
+                $i++;
+            } elsif($row->{'column_name'} eq 'element') {
+                $k[$i] = 'element';
+                $v[$i] = $element;
+                $i++;
+            } elsif(&get($row->{'column_name'}) ne "" && &get($row->{'column_name'}) ne "null") {
+                $k[$i] = $row->{'column_name'};
+                $v[$i] = &get($row->{'column_name'});
+                if($row->{'column_name'} eq 'password' && $v[$i] ne "not changed") {
+                    $v[$i] = 'password'.$v[$i].'password';
+                }
+                $i++;
+            } elsif($row->{'column_name'} eq "dt_ins") {
+                $k[$i] = 'dt_ins';
+                $v[$i] = 'now()';
+                $i++;
+            } elsif($tab eq "users" && $k[$f] eq 'blocked' && $v[$f] eq 'true') {
+                $k[$i] = 'blocked';
+                $v[$i] = 'now()';
+                $i++;
+            }
+        }
+    }
+  
+    if($i == 0) {
+        error("Não foram enviados dados para o recurso");
+    } else {
+        # Operação de insert
+        $r = substr($r, 0, -2);
+        $p = substr($p, 0, -2);
+        $sql = 'insert into '.$tab.' ("';
+        $sql .= join('", "', @k);
+        $sql .= '") values (\'';
+        $sql .= join("', '", @v);
+        $sql =~ s/,\s+$//;
+        $sql .= '\') returning '.$r;
+        
+        if($sql =~ /password/) {
+            $sql =~ s/'password/password('/g;
+            $sql =~ s/password'/')/g;
+        }
+        
+        $sql =~ s/&#39;/''/gm;
+        $sql =~ s/&apos;/''/gm;
+        
+        $sth = $dbh->prepare($sql);
+        $sth->execute();
+        if($dbh->err ne "") {
+            error("Falha os inserir os registros no recurso $tab: ".$dbh->errstr);
+        }
+        my $rv = $sth->rows;
+        if($rv > 0) {
+            my $msg = '{';
+            $msg .= '"status" : 200, ';
+            $msg .= '"message" : "Requisição executada com sucesso", ';
+            my $row = $sth->fetchrow_hashref;
+            $msg .= '"'.$p.'" : "'.$row->{$p}.'", ';
+            $msg =~ s/, $/ }/;
+            
+            $log .= ' em '.$tab;
+            if($r =~ /descrp/) {
+                $log .= ' '.$row->{descrp};
+            } elsif($r =~ /name/) {
+                $log .= ' '.$row->{name};
+            }
+            if($r =~ /id/) {
+                $log .= ' (código '.$row->{id}.')';
+            }
+            say_log($log);
+            
+            if($tab eq "entities") {
+                my $street = &get('address.street');
+                if($street eq "") {
+                    $street = &get('street');
+                }
+                my $email = &get('email');
+                my $phone = &get('phone');
+                if($street ne "") {
+                    $log = $user{name}.' (código '.$user{code}.')';
+                    $rv2 = $dbh->do(qq(insert into address ("entity", "street") values ('$row->{id}', '$street') ));
+                    $log .= ' inseriu o endereço '.$street.' na tabela address código '.$row->{$id};
+                    say_log($log);                
+                }
+                if($email ne "" && $email ne "null") {
+                    $log = $user{name}.' (código '.$user{code}.')';
+                    $rv2 = $dbh->do(qq(insert into entities_contacts ("entity", "type", "value") values ('$row->{id}', '3', '$email') ));
+                    $log .= ' inseriu o e-mail '.$email.' na entity_contacts código '.$row->{$id};
+                    say_log($log);
+                }
+                if($phone ne "" && $phone ne "null") {
+                    $log = $user{name}.' (código '.$user{code}.')';
+                    $rv3 = $dbh->do(qq(insert into entities_contacts ("entity", "type", "value") values ('$row->{id}', '1', '$phone') ));
+                    $log .= ' inseriu o telefone '.$phone.' na entity_contacts código '.$row->{$id};
+                    say_log($log);
+                }
+            } elsif($tab eq "entities_peoples") {
+                my $email = &get('email');
+                my $phone = &get('phone');
+                if($email ne "" && $email ne "null") {
+                    $log = $user{name}.' (código '.$user{code}.')';
+                    $rv2 = $dbh->do(qq(insert into entities_peoples_contacts ("people", "type", "value") values ('$row->{id}', '3', '$email') ));
+                    $log .= ' inseriu o e-mail '.$email.' na entity_peoples_contacts código '.$row->{$id};
+                    say_log($log);
+                }
+                if($phone ne "" && $phone ne "null") {
+                    $log = $user{name}.' (código '.$user{code}.')';
+                    $rv3 = $dbh->do(qq(insert into entities_peoples_contacts ("people", "type", "value") values ('$row->{id}', '1', '$phone') ));
+                    $log .= ' inseriu o telefone '.$phone.' na entity_peoples_contacts código '.$row->{$id};
+                    say_log($log);
+                }
+            }  elsif($tab eq "users") {
+                my $en = &get('entity');
+                if($en eq "" || $en eq "0") {
+                    $en = "1";
+                }
+                my $gr = &get('group');
+                $log = $user{name}.' (código '.$user{code}.')';
+                $rv2 = $dbh->do(qq(insert into entities_users ("user", "entity", "group") values ('$row->{id}', '$en', '$gr') ));
+                $log .= ' inseriu o usuário '.$row->{$id}.' da empresa código '.$en.' no grupo código '.$group;
+                say_log($log);                 
+            }
+            
+            if($tab eq "calendar_controls") {
+                $rv3 = $dbh->do(qq(SET DATESTYLE TO DMY));
+                $tab = 'calendar';
+                $query->param(-name=>'control', -value=>$row->{id});
+                $query->param(-name=>'lst_user_upd', -value=>$user{code});
+                my $start_date_ini = &get('start_date');
+                for(my $f=0; $f < &get('repeat'); $f++) {
+                    my $intv = &get('interval') * $f;
+                    my $start_date = $start_date_ini."'::date + interval '$intv ";
+                    if(&get('interval_type') eq '2') {
+                        $start_date .= "months";
+                    } else {
+                        $start_date .= "days";
+                    }
+                    $query->param(-name=>'start_date', -value=>$start_date);
+                    &insert;
+                }
+                &say_json($msg);
+            } elsif($tab eq "calendar") {
+                $users = &get('users');
+                foreach my $key ( keys %{$users} ) {
+                    if($users->{$key} eq 'true') {
+                        $rv2 = $dbh->do(qq(insert into calendar_users ("calendar", "user") values ('$row->{id}', '$key') ));
+                    }
+                }
+                if(&get('start_date') =~ /interval/) {
+                    return;
+                }
+            } elsif($tab eq "dti_groups_entities") {
+                my @itens = &get('itens');
+                foreach my $line ( @{$itens[0]} ) {
+                    $rv2 = $dbh->do(qq(insert into dti_groups_itens ("group_entity", "key", "pos", "key_name", "value") values ('$row->{id}', '$line->{key}', '$line->{pos}', '$line->{key_name}', '$line->{value}') ));
+                }
+                say_json($msg);
+            } else {
+                say_json($msg);
+            }
+        } else {
+            say("Não foi inserido nenhum registro");
+        }
+    }
+}
+
+
+sub update {
+
+    if($tab eq "list_projects") {
+        $tab = 'projects';
+    }
+
+    &chktbl;
+
+    my $p = "|";
+    my $k = ();
+    my $v = ();
+    my $w = ();
+    my $i = 0;
+    my $g = 0;
+    my $r = '';
+    
+    # Lista a chave primária da tabela
+    $sth = $dbh->prepare(qq(select a.attname, format_type(a.atttypid, a.atttypmod) as data_type from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = '$tab'::regclass and i.indisprimary));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao encontrar a chave primária do recurso requisitado");
+    }
+    if($sth->rows() > 0) {
+        while($row = $sth->fetchrow_hashref) {
+            $p .= $row->{'attname'}.'|';
+            $r .= $row->{'attname'}.', ';
+        }
+    }
+
+    my $owner = $user{'code'};
+    if($tab eq 'timesheet') {
+        my $id = &get('id');
+        my $worked = &get('worked');
+        my $day_start = &get('dt_start');
+        my $entity = &get('entity');
+        $day_start =~ s/\s[\d\:]*$//;
+        
+        if($user{group} < 3) {
+            $owner = &get('responsable');
+            if($owner eq "") {
+                $owner = $user{'code'};
+            }
+        }        
+
+        $sth = $dbh->prepare(qq(select * from (select to_char(dt_start, 'DD/MM/YYYY') as day_start, sum(worked::interval) as total from timesheet where timesheet.id != '$id' and owner = '$owner' and entity = '$entity' group by day_start) as sheet where sheet.day_start = '$day_start' and (sheet.total + interval '$worked') > interval '24 hours'));
+        $sth->execute();
+        
+        if($dbh->err ne "") {
+            error($dbh->errstr);
+        }
+
+        if($sth->rows() > 0) {
+            error("Não é permitido lançar mais de 24h em um mesmo dia para o mesmo cliente!");
+        }
+
+    }
+
+    # Lista as colunas da tabela
+    $sth = $dbh->prepare(qq(select column_name, data_type, coalesce(character_maximum_length, numeric_precision) as maximum_length, is_nullable from information_schema.columns t where table_schema = 'public' and table_name = ?));
+    $sth->execute($tab);
+    if($dbh->err ne "") {
+        error("Falha ao popular recurso requisitado");
+    }
+    if($sth->rows() == 0) {
+        error("Não existem colunas disponíveis");
+    } else {
+        while($row = $sth->fetchrow_hashref) {
+            if($row->{'column_name'} eq "descrp" || $row->{'column_name'} eq "name") {
+                $r .= $row->{'column_name'}.', ';
+            }
+            
+            if($row->{column_name} eq 'owner') {
+                if($user{group} > 2) {
+                    $w[$g] = '"owner" = \''.$owner.'\'';
+                    $g++;
+                }
+            } elsif($row->{'column_name'} eq 'blocked') {
+                $k[$i] = $row->{'column_name'};
+                $v[$i] = &get($row->{'column_name'});
+                $i++;
+            } elsif($row->{'column_name'} eq 'password' && &get($row->{'column_name'}) eq 'not changed') {
+                # Não faz update caso a senha não tenha mudado
+            } elsif(&get($row->{'column_name'}) ne '') {
+                if($p =~ /\|$row->{'column_name'}\|/) {
+                    $w[$g] = '"'.$row->{'column_name'}.'" = \''.&get($row->{'column_name'}).'\'';
+                    $g++;
+                } else {
+                    $k[$i] = $row->{'column_name'};
+                    $v[$i] = &get($row->{'column_name'});
+                    $i++;
+                }
+            }
+        }
+    }
+  
+    if($i == 0) {
+        error("Não foram enviados dados para o recurso");
+    } else {
+        if(scalar(@w) > 0) {
+            # Operação de update
+            $sql = 'update '.$tab.' set ';
+            for(my $f=0; $f< scalar(@k); $f++) {
+                if($p !~ /\|$k[$f]\|/) {
+                    if($k[$f] eq 'password') {
+                        $sql .= '"'.$k[$f].'"=password(\''.$v[$f].'\'), ';
+                    } elsif($v[$f] eq 'null') {
+                        $sql .= '"'.$k[$f].'"= null, ';
+                    } elsif($tab eq "users" && $k[$f] eq 'blocked') {
+                        if(&get('inativo') eq 'no' || &get('inativo') eq '') {
+                            $sql .= '"'.$k[$f].'"= NULL, ';
+                        } elsif($v[$f] eq '') { 
+                            $sql .= '"'.$k[$f].'"= now(), ';
+                        }
+                    } else {
+                        $sql .= '"'.$k[$f].'"=\''.$v[$f].'\', ';
+                    }
+                }
+            }
+            $sql =~ s/,\s$/ where /;
+            $sql .= join(' and ', @w);
+            $sql =~ s/and\s$//;
+            $r =~ s/, $//;
+            $sql .= ' returning '.$r;
+            $sth = $dbh->prepare($sql);
+            $sth->execute();
+            if($dbh->err ne "") {
+                error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+            }
+            my $rv = $sth->rows;
+            my $id;
+            if($rv > 0) {
+                $row = $sth->fetchrow_hashref;
+                $log .= $tab;
+                if($r =~ /descrp/) {
+                    $log .= ' '.$row->{descrp};
+                } elsif($r =~ /name/) {
+                    $log .= ' '.$row->{name};
+                }
+                if($r =~ /id/) {
+                    $log .= ' (código '.$row->{id}.')';
+                    $id = $row->{id};
+                }
+                say_log($log);
+            } else {
+                $log = "";
+            }
+            
+            if($id eq "") {
+                $id = &get('id');
+            }
+
+            if($id ne "" && $tab eq "entities") {
+
+                $log = $user{name}.' (código '.$user{code}.')';
+                my $street = &get('address.street');
+                if($street eq "") {
+                    $street = &get('street');
+                }
+                $sth5 = $dbh->prepare(qq(select * from address where entity = '$id' order by id limit 1));
+                $sth5->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $row5 = $sth5->fetchrow_hashref;
+                if($row5->{id} ne "") {
+                    if($street ne $row5->{street}) {
+                        if($street eq "" || $street eq "null") {
+                            $rv6 = $dbh->do(qq(delete from address where id = '$row5->{id}'));
+                            $log .= ' alterou o endereço da entidade código '.$row->{$id}.' apagando '.$row5->{street};
+                        } else {
+                            $rv6 = $dbh->do(qq(update address set "street" = '$street' where id = '$row5->{id}'));
+                            $log .= ' alterou o endereço da entidade código '.$row->{$id}.' de '.$row5->{street}.' para '.$street;
+                        }
+                    } elsif($row5->{street} eq "null") {
+                        $rv6 = $dbh->do(qq(delete from address where id = '$row5->{id}'));
+                        $log .= ' alterou o endereço da entidade código '.$row->{$id}.' apagando '.$row5->{street};
+                    } else {
+                        $log = '';
+                    }
+                } elsif($street ne "" && $street ne "null") {
+                    $rv6 = $dbh->do(qq(insert into address ("entity", "street") values ('$row->{id}', '$street') ));
+                    $log .= ' inseriu o endereço '.$street.' na entidade código '.$row->{$id};                
+                } else {
+                    $log = '';
+                }
+                
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar o endereço do registro no recurso: ".$dbh->errstr);
+                }
+                
+                if($log ne "") {
+                    say_log($log);
+                }
+            
+            
+                $log = $user{name}.' (código '.$user{code}.')';
+                my $email = &get('email');
+                my $phone = &get('phone');            
+                $sth2 = $dbh->prepare(qq(select * from entities_contacts where entity = '$id' and type = '3' order by id limit 1));
+                $sth2->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $row2 = $sth2->fetchrow_hashref;
+                if($row2->{id} ne "") {
+                    if($email ne "" && $email ne "null") {
+                        $rv3 = $dbh->do(qq(update entities_contacts set "value" = '$email' where id = '$row2->{id}' and type = '3'));
+                        $log .= ' alterou o e-mail da entity_contacts código '.$row->{$id}.' de '.$row->{value}.' para '.$email;
+                    } else {
+                        $rv3 = $dbh->do(qq(delete from entities_contacts where id = '$row2->{id}'));
+                        $log .= ' excluiu o e-mail '.$row->{value}.' da entity_contacts código '.$row->{id};
+                    }
+                } else {
+                    $rv3 = $dbh->do(qq(insert into entities_contacts ("entity", "type", "value") values ('$row->{id}', '3', '$email') ));
+                    $log .= ' inseriu o e-mail '.$email.' na entity_contacts código '.$row->{$id};                
+                
+                }
+                
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar o e-mail do registro no recurso: ".$dbh->errstr);
+                }
+                say_log($log);
+                
+
+                $log = $user{name}.' (código '.$user{code}.')';
+                $sth4 = $dbh->prepare(qq(select * from entities_contacts where entity = '$id' and type = '1' order by id limit 1));
+                $sth4->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $row4 = $sth4->fetchrow_hashref;
+                if($row4->{id} ne "") {
+                    if($phone ne "" && $phone ne "null") {
+                        $rv5 = $dbh->do(qq(update entities_contacts set "value" = '$phone' where id = '$row4->{id}' and type = '1'));
+                        $log .= ' alterou o telefone da entity_contacts código '.$row4->{$id}.' de '.$row4->{value}.' para '.$phone;
+                    } else {
+                        $rv5 = $dbh->do(qq(delete from entities_contacts where id = '$row4->{id}'));
+                        $log .= ' excluiu o telefone '.$row4->{value}.' da entity_contacts código '.$row4->{id};
+                    }
+                } else {
+                    $rv5 = $dbh->do(qq(insert into entities_contacts ("entity", "type", "value") values ('$row->{id}', '1', '$phone') ));
+                    $log .= ' inseriou o telefone $phone na entity_contacts código '.$row->{$id};                
+                }
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar o telefone do registro no recurso: ".$dbh->errstr);
+                }
+                say_log($log);
+            } elsif($tab eq "users") {
+                my $en = &get('entity');
+                if($en eq "" || $en eq "0") {
+                    $en = "1";
+                }
+                my $gr = &get('group');
+                $log = $user{name}.' (código '.$user{code}.')';
+                $sth2 = $dbh->prepare(qq(select * from entities_users where "user" = '$row->{id}' and entity = '$en' ));
+                $sth2->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $rv2 = $sth2->rows();
+                if($rv2 == 0) {
+                    $rv3 = $dbh->do(qq(insert into entities_users ("user", "entity", "group") values ('$row->{id}', '$en', '$gr') ));
+                    $log .= ' inseriu o usuário '.$row->{$id}.' da empresa código '.$en.' no grupo código '.$group;				
+                } elsif($rv2 == 1) {
+                    $row2 = $sth2->fetchrow_hashref;
+                    $rv3 = $dbh->do(qq(update entities_users set "group" = '$gr' where "user" = '$row->{id}' and entity = '$en'));
+                    $log .= ' alterou o grupo do usuário '.$row->{$id}.' da empresa '.$en.' de '.$row2->{group}.' para '.$gr;
+                } else {
+                    $rv3 = $dbh->do(qq(delete from entities_users where "user" = '$row->{id}' and entity = '$en'; insert into entities_users ("user", "entity", "group") values ('$row->{id}', '$en', '$gr') ));
+                    $log .= ' inseriu o usuário '.$row->{$id}.' da empresa código '.$en.' no grupo código '.$group;		
+                }
+                say_log($log);                
+            } elsif($id ne "" && $tab eq "entities_peoples") {
+
+                $log = $user{name}.' (código '.$user{code}.')';
+                my $email = &get('email');
+                my $phone = &get('phone');            
+                $sth2 = $dbh->prepare(qq(select * from entities_peoples_contacts where people = '$id' and type = '3' order by id limit 1));
+                $sth2->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $row2 = $sth2->fetchrow_hashref;
+                if($row2->{id} ne "") {
+                    if($email ne "" && $email ne "null") {
+                        $rv3 = $dbh->do(qq(update entities_peoples_contacts set "value" = '$email' where id = '$row2->{id}' and type = '3'));
+                        $log .= ' alterou o e-mail da entity_peoples_contacts código '.$row->{$id}.' de '.$row->{value}.' para '.$email;
+                    } else {
+                        $rv3 = $dbh->do(qq(delete from entities_peoples_contacts where id = '$row2->{id}'));
+                        $log .= ' excluiu o e-mail '.$row->{value}.' da entity_peoples_contacts código '.$row->{id};
+                    }
+                } else {
+                    $rv3 = $dbh->do(qq(insert into entities_peoples_contacts ("people", "type", "value") values ('$row->{id}', '3', '$email') ));
+                    $log .= ' inseriu o e-mail '.$email.' na entity_peoples_contacts código '.$row->{$id};                
+                }
+                
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar o e-mail do registro no recurso: ".$dbh->errstr);
+                }
+
+                say_log($log);
+                
+
+                $log = $user{name}.' (código '.$user{code}.')';
+                $sth4 = $dbh->prepare(qq(select * from entities_peoples_contacts where people = '$id' and type = '1' order by id limit 1));
+                $sth4->execute();
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar os registros no recurso: ".$dbh->errstr);
+                }
+                $row4 = $sth4->fetchrow_hashref;
+                if($row4->{id} ne "") {
+                    if($phone ne "" && $phone ne "null") {
+                        $rv5 = $dbh->do(qq(update entities_peoples_contacts set "value" = '$phone' where id = '$row4->{id}' and type = '1'));
+                        $log .= ' alterou o telefone da entity_peoples_contacts código '.$row4->{$id}.' de '.$row4->{value}.' para '.$phone;
+                    } else {
+                        $rv5 = $dbh->do(qq(delete from entities_peoples_contacts where id = '$row4->{id}'));
+                        $log .= ' excluiu o telefone '.$row4->{value}.' da entity_peoples_contacts código '.$row4->{id};
+                    }
+                } else {
+                    $rv5 = $dbh->do(qq(insert into entities_peoples_contacts ("people", "type", "value") values ('$row->{id}', '1', '$phone') ));
+                    $log .= ' inseriou o telefone $phone na entity_peoples_contacts código '.$row->{$id};                
+                }
+                
+                if($dbh->err ne "") {
+                    error("Falha ao atualizar o telefone do registro no recurso: ".$dbh->errstr);
+                }
+                say_log($log);
+
+            } elsif($tab eq "dti_groups_entities") {
+                my @itens = &get('itens');
+                $rv2 = $dbh->do(qq(delete from dti_groups_itens where "group_entity" = '$row->{id}'));
+                if($dbh->err ne "") {
+                    error("Falha ao limpar os itens no recurso: ".$dbh->errstr);
+                }
+                
+                foreach my $line ( @{$itens[0]} ) {
+                    $rv2 = $dbh->do(qq(insert into dti_groups_itens ("group_entity", "key", "pos", "key_name", "value") values ('$row->{id}', '$line->{key}', '$line->{pos}', '$line->{key_name}', '$line->{value}') ));
+                    if($dbh->err ne "") {
+                        error("Falha ao atualizar os itens do grupo no recurso: ".$dbh->errstr);
+                    }
+                }
+                    
+                say_json($msg);
+                
+            } elsif($id ne "" && $tab eq "calendar") {
+                my $nodel = '';
+                my $uins = '';
+                $users = &get('users');
+                foreach my $key ( keys %{$users} ) {
+                    if($users->{$key} eq 'true') {
+                        $rv3 = $dbh->do(qq(insert into calendar_users ("calendar", "user") select '$row->{id}', '$key' where not exists (select 1 from calendar_users where calendar='$row->{id}' and "user"='$key') ));
+                        if($dbh->err ne "") {
+                            error("Falha ao atualizar os usuários no recurso: ".$dbh->errstr);
+                        }
+                        if($rv3 > 0) {
+                            $uins .= $key.', ';
+                        }
+                        $nodel .= $key.', ';
+                    }
+                }
+                if($nodel ne '') {
+                    $uins =~ s/, $/)/;
+                    $uins = ' and "user" in ('.$uins;
+                    $sth4 = $dbh->prepare(qq(select users.name, users.id from calendar_users join users on calendar_users.user = users.id where calendar='$row->{id}' $uins ));
+                    $sth4->execute();
+                    if($dbh->err ne "") {
+                        error("Falha ao criar o log dos incluídos no recurso: ".$dbh->errstr);
+                    }
+                    $rv4 = $sth4->rows();
+                    if($rv4 == 1) {
+                        $log = ' incluiu o usuário ';
+                    } else {
+                        $log = ' incluiu os usuários ';
+                    }
+                    if($rv4 > 0) {
+                        $log = $user{name}.' (código '.$user{code}.')'.$log;
+                        while($row4 = $sth4->fetchrow_hashref) {
+                            $log .= $row4->{name}.'('.$row4->{id}.'), ';
+                        }
+                    $log .= ' do calendário '.$row->{name}.' código '.$row->{id};
+                    say_log($log);
+                    }
+                }
+                
+                if($nodel ne '') {
+                    $nodel =~ s/, $/)/;
+                    $nodel = ' and "user" not in ('.$nodel;
+                    $sth5 = $dbh->prepare(qq(select users.name, users.id from calendar_users join users on calendar_users.user = users.id where calendar='$row->{id}' $nodel ));
+                    $sth5->execute();
+                    if($dbh->err ne "") {
+                        error("Falha ao criar o log dos excluídos no recurso: ".$dbh->errstr);
+                    }
+                    $rv5 = $sth5->rows();
+                    if($rv5 == 1) {
+                        $log = ' excluiu o usuário ';
+                    } else {
+                        $log = ' excluiu os usuários ';
+                    }
+                    if($rv5 > 0) {
+                        $log = $user{name}.' (código '.$user{code}.')'.$log;
+                        while($row5 = $sth5->fetchrow_hashref) {
+                            $log .= $row5->{name}.'('.$row5->{id}.'), ';
+                        }
+                        $rv6 = $dbh->do(qq(delete from calendar_users where calendar='$row->{id}' $nodel ));
+                        if($dbh->err ne "") {
+                            error("Falha ao excluir os usuários no recurso: ".$dbh->errstr);
+                        }
+                        $log .= ' do calendário '.$row->{name}.' código '.$row->{id};
+                        say_log($log);
+                    }
+                }
+            }
+            
+            if($log ne "") {
+                say("Requisição executada com sucesso");
+            } else {
+                error("Não foi atualizado nenhum registro");
+            }            
+            
+        } else {
+            error("Chave do recurso não informada");
+        }
+    }
+}
+
+
+sub delete {
+
+    if($tab =~ /\//) {
+        ($tab) = ($tab =~ /^([a-zA-Z0-9\_\-]+)\//);
+    }
+    
+    if($tab eq "list_projects") {
+        $tab = 'projects';
+    }    
+    
+    &chktbl;
+
+    my $p = "";
+    my $k = ();
+    my $v = ();
+    my $w = ();
+    my $i = 0;
+    my $g = 0;
+
+    $sth = $dbh->prepare(qq(select a.attname, format_type(a.atttypid, a.atttypmod) as data_type from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = '$tab'::regclass and i.indisprimary));
+    $sth->execute();
+    if($dbh->err ne "") {
+        error("Falha ao encontrar a chave primária do recurso requisitado");
+    }
+    if($sth->rows() == 0) {
+        error("Impossível exclusão de recurso sem valor na chave primária");
+    } else {
+        $sql = "delete from $tab where ";
+        while($row = $sth->fetchrow_hashref) {
+            if(&get($row->{'attname'}) ne "") {
+                $sql .= '"'.$row->{'attname'}.'"=\''.&get($row->{'attname'}).'\'';
+            } else {
+                (my $k, $v) = ($req =~ /[\?|&|\/]+($row->{'attname'})[=|\/]([0-9a-zA-Z]+)/);
+                if($k ne "" && $v ne "") {
+                    $sql .= '"'.$k.'"=\''.$v.'\'';
+                    if($k eq 'id') {
+                        $id = $v;
+                    }
+                } else {
+                    error("Impossível exclusão de recurso sem valor na chave primária");
+                }
+            }
+        }
+    }
+
+    $rv = $dbh->do($sql);
+    if($dbh->err ne "") {
+        error("Falha ao excluir o registro no recurso: ".$dbh->errstr);
+    }
+    
+    if($rv > 0) {
+        if($tab eq 'files' && $id ne '') {
+            if($id < 10) {
+                    $folder = '0'.substr($id,0,1);
+                } else {
+                    $folder = substr($id,0,2);
+                }
+            $filename = $dir_anexos.$folder.'/'.$id;
+            if(-f $filename) {
+                unlink $filename;
+            }
+        }
+        say_log($log.' um registro na tabela '.$tab);
+        say("Requisição executada com sucesso");
+    } else {
+        say("Não foi excluído nenhum registro");
+    }
+}
