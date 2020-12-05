@@ -12,6 +12,7 @@ use Encode qw( decode_utf8 );
 use CGI;
 use DBI;
 use DBD::mysql;
+use Data::Dumper;
 
 use constant false => 1==0;
 use constant true => not false;

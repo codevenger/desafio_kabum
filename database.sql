@@ -14,19 +14,20 @@ CREATE TABLE `menu_control` (
   `descrp` varchar(100) NOT NULL,
   `goto` varchar(200) DEFAULT NULL,
   `seq` smallint(6) NOT NULL DEFAULT '99',
-  `css` varchar(50) DEFAULT NULL,
-  `icon` varchar(10) DEFAULT NULL
+  `css` varchar(50) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
 -- Extraindo dados da tabela `menu_control`
 --
 
-INSERT INTO `menu_control` (`id`, `parent`, `descrp`, `goto`, `seq`, `css`, `icon`) VALUES
-(1, NULL, 'Início', 'home', 1, 'fa-home', NULL),
-(2, NULL, 'Manutenção', NULL, 5, 'fa-wrench', NULL),
-(3, 2, 'Tipo de usuário', 'groups', 51, 'fa-users', NULL),
-(4, 2, 'Cadastro de Usuários', 'users', 52, 'fa-user', NULL);
+INSERT INTO `menu_control` (`id`, `parent`, `descrp`, `goto`, `seq`, `css`) VALUES
+(1, NULL, 'Início', 'home', 1, 'fa-home'),
+(2, NULL, 'Clientes', 'entities', 2, 'fa fa-briefcase'),
+(3, NULL, 'Manutenção', NULL, 5, 'fa-wrench'),
+(4, 3, 'Tipo de usuário', 'groups', 51, 'fa-user'),
+(5, 3, 'Grupos de usuários', 'users_groups', 52, 'fa-users'), 
+(6, 3, 'Cadastro de Usuários', 'users', 53, 'fa-user-plus');
 
 -- --------------------------------------------------------
 
@@ -108,7 +109,8 @@ INSERT INTO `groups_menu` (`id`, `menu`, `group`, `dt_ins`) VALUES
 (2, 2, 1, '2020-12-03 15:10:30'),
 (3, 3, 1, '2020-12-03 15:10:30'),
 (4, 4, 1, '2020-12-03 15:10:30'),
-(5, 5, 1, '2020-12-03 15:10:30');
+(5, 5, 1, '2020-12-03 15:10:30'),
+(6, 6, 1, '2020-12-03 15:10:30');
 
 --
 -- Estrutura da tabela `groups_tables`
@@ -126,8 +128,8 @@ CREATE TABLE groups_tables (
 -- Extraindo dados da tabela `groups_tables`
 --
 
-INSERT INTO `groups_tables` (`id`, `menu`, `group`, `dt_ins`) VALUES
-(1, 'users', 1, 9, '2020-12-03 15:10:30')
+INSERT INTO `groups_tables` (`id`, `table`, `group`, `level`, `dt_ins`) VALUES
+(1, 'users', 1, 9, '2020-12-03 15:10:30');
 
 --
 -- Estrutura da tabela `users_signin`
@@ -189,7 +191,7 @@ ALTER TABLE `users_signin`
 -- AUTO_INCREMENT for table `menu_control`
 --
 ALTER TABLE `menu_control`
-  MODIFY `id` smallint(5) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `id` smallint(5) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=7;
 --
 -- AUTO_INCREMENT for table `users`
 --

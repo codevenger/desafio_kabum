@@ -91,6 +91,42 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
             }
         })
         
+        .state('entities', {
+            parent: main,
+            url: '/entities',
+            templateUrl: 'default/default.component.html',
+            controller: 'defaultCtrl',
+            controllerAs: 'tctrl',
+            render: {
+                name: 'Clientes',
+                resource: 'entities',
+                columns: [
+                    {
+                        title: "Código",
+                        field: "id",
+                        width: 20
+                    },
+                    {
+                        title: "Nome",
+                        field: "name"
+                    }
+                ],
+                data: [
+                    {
+                        title: "Razão Social",
+                        field: "name",
+                        width: 100,
+                        required: "true"
+                    },
+                    {
+                        title: "Nome Fantasia",
+                        field: "alias",
+                        width: 100
+                    }
+                ]
+            }
+        })
+        
         .state('groups', {
             parent: main,
             url: '/groups',
@@ -141,7 +177,7 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
                         title: "Usuário",
                         field: "username",
                         width: 20
-                    },               
+                    },
                     {
                         title: "Nome",
                         field: "name"
@@ -168,7 +204,65 @@ app.config(function($stateProvider, $urlRouterProvider, $locationProvider, $conf
                     }
                 ]
             }
-        });
+        })
         
+        .state('users_groups', {
+            parent: main,
+            url: '/users_groups',
+            templateUrl: 'default/default.component.html',
+            controller: 'defaultCtrl',
+            controllerAs: 'tctrl',
+            render: {
+                name: 'Grupos de Usuários',
+                resource: 'users_groups',
+                columns: [
+                    {
+                        title: "Código",
+                        field: "id",
+                        width: 10
+                    },
+                    {
+                        title: "Grupo",
+                        field: "group",
+                        width: 20
+                    },
+                    {
+                        title: "Usuário",
+                        field: "username",
+                        width: 20
+                    },
+                    {
+                        title: "Nome",
+                        field: "name"
+                    }
+                ],
+                data: [
+                    {
+                        title: "Grupo",
+                        field: "group",
+                        width: 30,
+                        required: "true"
+                    },
+                    {
+                        title: "Usuário",
+                        field: "username",
+                        width: 30,
+                        required: "true"
+                    },
+                    {
+                        title: "Nome",
+                        field: "name",
+                        width: 65,
+                        required: "true"
+                    },
+                    {
+                        title: "E-Mail",
+                        field: "email",
+                        width: 70,
+                        required: "true"
+                    }
+                ]
+            }
+        });
     
 });
